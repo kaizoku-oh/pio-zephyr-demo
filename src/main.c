@@ -38,9 +38,9 @@ static const struct gpio_dt_spec redLED = GPIO_DT_SPEC_GET(LED2_NODE, gpios);
 /* Button GPIO information specified in devicetree */
 static const struct gpio_dt_spec button = GPIO_DT_SPEC_GET_OR(SW0_NODE, gpios, {0});
 /* GPIO callback structure */
-static struct gpio_callback buttonCbData;
+static struct gpio_callback buttonCbData = {0};
 /* Network Management event callback structure */
-static struct net_mgmt_event_callback netMgmtEvtCb;
+static struct net_mgmt_event_callback netMgmtEvtCb = {0};
 
 /*-----------------------------------------------------------------------------------------------*/
 /* Exported functions                                                                            */
@@ -49,7 +49,6 @@ void main(void)
 {
   struct net_if *netIf;
 
-  k_msleep(1000);
   LOG_INF("%s", "============================================");
   LOG_INF("%s", "========== PlatformIO Zephyr demo ==========");
   LOG_INF("%s", "============================================");
@@ -95,7 +94,7 @@ static void _button_pressed_cb(const struct device *dev, struct gpio_callback *c
   LOG_INF("Button pressed at %" PRIu32, k_cycle_get_32());
 }
 
-static void _dhcpv4_handler(struct net_mgmt_event_callback *pstNetMgmtEvtCb, uint32_t mgmtEvent, struct net_if *netIf)
+static void _dhcpv4_handler(struct net_mgmt_event_callback *netMgmtEvtCb, uint32_t mgmtEvent, struct net_if *netIf)
 {
   char buf[NET_IPV4_ADDR_LEN];
 
