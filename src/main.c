@@ -1,7 +1,6 @@
 #include <zephyr.h>
 #include <logging/log.h>
 LOG_MODULE_REGISTER(pio_zephyr_demo, LOG_LEVEL_DBG);
-#include <kernel.h>
 
 void main(void)
 {
