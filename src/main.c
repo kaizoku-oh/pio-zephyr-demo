@@ -41,10 +41,9 @@ static struct gpio_callback buttonCbData;
 /*-----------------------------------------------------------------------------------------------*/
 void main(void)
 {
-  k_msleep(1000);
-  LOG_INF("============================================");
-  LOG_INF("========== PlatformIO Zephyr demo ==========");
-  LOG_INF("============================================");
+  LOG_INF("%s", "============================================");
+  LOG_INF("%s", "========== PlatformIO Zephyr demo ==========");
+  LOG_INF("%s", "============================================");
 
   /* Configure LEDs */
   gpio_pin_configure_dt(&greenLED, GPIO_OUTPUT_ACTIVE);
