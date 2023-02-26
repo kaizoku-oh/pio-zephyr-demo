@@ -1,0 +1,1 @@
+PlatformIO Zephyr demo on a NUCLEO-767zi board
