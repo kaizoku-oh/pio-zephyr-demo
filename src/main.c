@@ -3,8 +3,9 @@
 /*-----------------------------------------------------------------------------------------------*/
 #include <zephyr.h>
 #include <drivers/gpio.h>
-#include <logging/log.h>
-LOG_MODULE_REGISTER(pio_zephyr_demo, LOG_LEVEL_DBG);
+#include <net/net_if.h>
+#include <net/net_mgmt.h>
+#include <sys/printk.h>
 
 /*-----------------------------------------------------------------------------------------------*/
 /* Defines                                                                                       */
@@ -23,6 +24,8 @@ LOG_MODULE_REGISTER(pio_zephyr_demo, LOG_LEVEL_DBG);
 /*-----------------------------------------------------------------------------------------------*/
 /* Button callback function */
 static void _button_pressed_cb(const struct device *dev, struct gpio_callback *cb, uint32_t pins);
+/* DHCP client callback function */
+static void _dhcpv4_handler(struct net_mgmt_event_callback *, uint32_t, struct net_if *);
 
 /*-----------------------------------------------------------------------------------------------*/
 /* Private variables                                                                             */
@@ -34,31 +37,44 @@ static const struct gpio_dt_spec redLED = GPIO_DT_SPEC_GET(LED2_NODE, gpios);
 /* Button GPIO information specified in devicetree */
 static const struct gpio_dt_spec button = GPIO_DT_SPEC_GET_OR(SW0_NODE, gpios, {0});
 /* GPIO callback structure */
-static struct gpio_callback buttonCbData;
+static struct gpio_callback buttonCbData = {0};
+/* Network Management event callback structure */
+static struct net_mgmt_event_callback netMgmtEvtCb = {0};
 
 /*-----------------------------------------------------------------------------------------------*/
 /* Exported functions                                                                            */
 /*-----------------------------------------------------------------------------------------------*/
 void main(void)
 {
-  LOG_INF("%s", "============================================");
-  LOG_INF("%s", "========== PlatformIO Zephyr demo ==========");
-  LOG_INF("%s", "============================================");
+  struct net_if *netIf;
+
+  printk("============================================\r\n");
+  printk("========== PlatformIO Zephyr demo ==========\r\n");
+  printk("Board:     %s\r\n", CONFIG_BOARD);
+  printk("MCU:       %s\r\n", CONFIG_SOC);
+  printk("Frequency: %d MHz\r\n", CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC / 1000000);
+  printk("============================================\r\n");
 
   /* Configure LEDs */
   gpio_pin_configure_dt(&greenLED, GPIO_OUTPUT_ACTIVE);
-  LOG_INF("Setting up green LED at %s pin %d", greenLED.port->name, greenLED.pin);
+  printk("Setting up green LED at %s pin %d\r\n", greenLED.port->name, greenLED.pin);
   gpio_pin_configure_dt(&blueLED, GPIO_OUTPUT_ACTIVE);
-  LOG_INF("Setting up blue LED at %s pin %d", blueLED.port->name, blueLED.pin);
+  printk("Setting up blue LED at %s pin %d\r\n", blueLED.port->name, blueLED.pin);
   gpio_pin_configure_dt(&redLED, GPIO_OUTPUT_ACTIVE);
-  LOG_INF("Setting up red LED at %s pin %d", redLED.port->name, redLED.pin);
+  printk("Setting up red LED at %s pin %d\r\n", redLED.port->name, redLED.pin);
 
   /* Configure button */
   gpio_pin_configure_dt(&button, GPIO_INPUT);
   gpio_pin_interrupt_configure_dt(&button, GPIO_INT_EDGE_TO_ACTIVE);
   gpio_init_callback(&buttonCbData, _button_pressed_cb, BIT(button.pin));
   gpio_add_callback(button.port, &buttonCbData);
-  LOG_INF("Setting up button at %s pin %d", button.port->name, button.pin);
+  printk("Setting up button at %s pin %d\r\n", button.port->name, button.pin);
+
+  /* Start DHCP client */
+  net_mgmt_init_event_callback(&netMgmtEvtCb, _dhcpv4_handler, NET_EVENT_IPV4_ADDR_ADD);
+  net_mgmt_add_event_callback(&netMgmtEvtCb);
+  netIf = net_if_get_default();
+  net_dhcpv4_start(netIf);
 
   /* Simulate LEDs racing effect */
   while(1)
@@ -77,5 +93,31 @@ void main(void)
 /*-----------------------------------------------------------------------------------------------*/
 static void _button_pressed_cb(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
-  LOG_INF("Button pressed at %" PRIu32, k_cycle_get_32());
+  printk("Button pressed at %"PRIu32"\r\n", k_cycle_get_32());
+}
+
+static void _dhcpv4_handler(struct net_mgmt_event_callback *netMgmtEvtCb, uint32_t mgmtEvent, struct net_if *netIf)
+{
+  char buf[NET_IPV4_ADDR_LEN];
+
+  switch (mgmtEvent)
+  {
+  case NET_EVENT_IPV4_DHCP_START:
+    break;
+  case NET_EVENT_IPV4_DHCP_STOP:
+    break;
+  case NET_EVENT_IPV4_DHCP_BOUND:
+    break;
+  case NET_EVENT_IPV4_ADDR_ADD:
+    if(NET_ADDR_DHCP == netIf->config.ip.ipv4->unicast[0].addr_type)
+    {
+      printk("Your address: %s\r\n", net_addr_ntop(AF_INET, &netIf->config.ip.ipv4->unicast[0].address.in_addr, buf, sizeof(buf)));
+      printk("Lease time: %u seconds\r\n", netIf->config.dhcpv4.lease_time);
+      printk("Subnet: %s\r\n", net_addr_ntop(AF_INET, &netIf->config.ip.ipv4->netmask, buf, sizeof(buf)));
+      printk("Router: %s\r\n", net_addr_ntop(AF_INET, &netIf->config.ip.ipv4->gw, buf, sizeof(buf)));
+    }
+    break;
+  default:
+    break;
+  }
 }
