@@ -2,10 +2,12 @@
 /* Includes                                                                                      */
 /*-----------------------------------------------------------------------------------------------*/
 #include <zephyr.h>
+#include <sys/printk.h>
 #include <drivers/gpio.h>
 #include <net/net_if.h>
 #include <net/net_mgmt.h>
-#include <sys/printk.h>
+#include <net/socket.h>
+#include <net/mqtt.h>
 
 /*-----------------------------------------------------------------------------------------------*/
 /* Defines                                                                                       */
@@ -18,14 +20,18 @@
 #define LED2_NODE DT_ALIAS(led2)
 /* The devicetree node identifier for the "sw0" alias */
 #define SW0_NODE DT_ALIAS(sw0)
+/* IP address for "test.mosquitto.org" */
+#define BROKER_IP_ADDRESS "91.121.93.94"
 
 /*-----------------------------------------------------------------------------------------------*/
 /* Private function prototypes                                                                   */
 /*-----------------------------------------------------------------------------------------------*/
 /* Button callback function */
-static void _button_pressed_cb(const struct device *dev, struct gpio_callback *cb, uint32_t pins);
+static void _button_pressed_cb(const struct device *, struct gpio_callback *, uint32_t);
 /* DHCP client callback function */
 static void _dhcpv4_handler(struct net_mgmt_event_callback *, uint32_t, struct net_if *);
+/* MQTT client callback function */
+static void _mqtt_evt_handler(struct mqtt_client *, const struct mqtt_evt *);
 
 /*-----------------------------------------------------------------------------------------------*/
 /* Private variables                                                                             */
@@ -40,13 +46,26 @@ static const struct gpio_dt_spec button = GPIO_DT_SPEC_GET_OR(SW0_NODE, gpios, {
 static struct gpio_callback buttonCbData = {0};
 /* Network Management event callback structure */
 static struct net_mgmt_event_callback netMgmtEvtCb = {0};
+/* Got IP address flag */
+static bool gotIP = false;
+/* Buffers for MQTT client */
+static uint8_t rxBuffer[256] = {0};
+static uint8_t txBuffer[256] = {0};
+/* MQTT client context */
+static struct mqtt_client clientCtx = {0};
+/* MQTT Broker address information */
+static struct sockaddr_storage broker = {0};
+/* MQTT connection flag */
+static bool mqttConnected = false;
 
 /*-----------------------------------------------------------------------------------------------*/
 /* Exported functions                                                                            */
 /*-----------------------------------------------------------------------------------------------*/
 void main(void)
 {
-  struct net_if *netIf;
+  struct net_if *netIf = NULL;
+  struct sockaddr_in *broker4 = NULL;
+  struct pollfd fds[1] = {0};
 
   printk("============================================\r\n");
   printk("========== PlatformIO Zephyr demo ==========\r\n");
@@ -75,6 +94,56 @@ void main(void)
   net_mgmt_add_event_callback(&netMgmtEvtCb);
   netIf = net_if_get_default();
   net_dhcpv4_start(netIf);
+
+  /* Wait for an IP address from the DHCP server */
+  printk("Waiting for IP address");
+  while(!gotIP)
+  {
+    printk(".");
+    k_msleep(500);
+  }
+  printk("\r\n");
+
+  /* Connect to MQTT broker */
+  mqtt_client_init(&clientCtx);
+
+  /* Broker configuration */
+  broker4 = (struct sockaddr_in *)&broker;
+  broker4->sin_family = AF_INET;
+  broker4->sin_port = htons(1883);
+  zsock_inet_pton(AF_INET, BROKER_IP_ADDRESS, &broker4->sin_addr);
+
+  /* MQTT client configuration */
+  clientCtx.broker = &broker;
+  clientCtx.evt_cb = _mqtt_evt_handler;
+  clientCtx.client_id.utf8 = (uint8_t *)"zephyr_mqtt_client";
+  clientCtx.client_id.size = sizeof("zephyr_mqtt_client") - 1;
+  clientCtx.password = NULL;
+  clientCtx.user_name = NULL;
+  clientCtx.protocol_version = MQTT_VERSION_3_1_1;
+  clientCtx.transport.type = MQTT_TRANSPORT_NON_SECURE;
+
+  /* MQTT buffers configuration */
+  clientCtx.rx_buf = rxBuffer;
+  clientCtx.rx_buf_size = sizeof(rxBuffer);
+  clientCtx.tx_buf = txBuffer;
+  clientCtx.tx_buf_size = sizeof(txBuffer);
+
+  /* Start connecting to the broker */
+  mqtt_connect(&clientCtx);
+
+  /* Wait for MQTT client to connect to the broker */
+  printk("Connecting to %s\r\n", BROKER_IP_ADDRESS);
+  while(!mqttConnected)
+  {
+    printk(".");
+    k_msleep(500);
+    fds[0].fd = clientCtx.transport.tcp.sock;
+    fds[0].events = ZSOCK_POLLIN;
+    zsock_poll(fds, 1, 500);
+    mqtt_input(&clientCtx);
+  }
+  printk("\r\n");
 
   /* Simulate LEDs racing effect */
   while(1)
@@ -115,7 +184,23 @@ static void _dhcpv4_handler(struct net_mgmt_event_callback *netMgmtEvtCb, uint32
       printk("Lease time: %u seconds\r\n", netIf->config.dhcpv4.lease_time);
       printk("Subnet: %s\r\n", net_addr_ntop(AF_INET, &netIf->config.ip.ipv4->netmask, buf, sizeof(buf)));
       printk("Router: %s\r\n", net_addr_ntop(AF_INET, &netIf->config.ip.ipv4->gw, buf, sizeof(buf)));
+      gotIP = true;
     }
+    break;
+  default:
+    break;
+  }
+}
+
+static void _mqtt_evt_handler(struct mqtt_client *client, const struct mqtt_evt *evt)
+{
+  switch(evt->type)
+  {
+  case MQTT_EVT_CONNACK:
+    mqttConnected = true;
+    break;
+  case MQTT_EVT_DISCONNECT:
+    mqttConnected = false;
     break;
   default:
     break;
