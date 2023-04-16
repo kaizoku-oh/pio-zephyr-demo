@@ -8,12 +8,15 @@
 #include <net/net_mgmt.h>
 #include <net/socket.h>
 #include <net/mqtt.h>
+#include <random/rand32.h>
 
 /*-----------------------------------------------------------------------------------------------*/
 /* Defines                                                                                       */
 /*-----------------------------------------------------------------------------------------------*/
 /* Blink delay in milliseconds */
 #define BLINK_DELAY_MS (100)
+/* Publish delay in milliseconds */
+#define PUBLISH_DELAY_MS (3000)
 /* The devicetree node identifiers for the "led0" "led1" and "led2" aliases */
 #define LED0_NODE DT_ALIAS(led0)
 #define LED1_NODE DT_ALIAS(led1)
@@ -66,6 +69,7 @@ void main(void)
   struct net_if *netIf = NULL;
   struct sockaddr_in *broker4 = NULL;
   struct pollfd fds[1] = {0};
+  struct mqtt_publish_param publishParams;
 
   printk("============================================\r\n");
   printk("========== PlatformIO Zephyr demo ==========\r\n");
@@ -102,7 +106,6 @@ void main(void)
     printk(".");
     k_msleep(500);
   }
-  printk("\r\n");
 
   /* Connect to MQTT broker */
   mqtt_client_init(&clientCtx);
@@ -133,7 +136,7 @@ void main(void)
   mqtt_connect(&clientCtx);
 
   /* Wait for MQTT client to connect to the broker */
-  printk("Connecting to %s\r\n", BROKER_IP_ADDRESS);
+  printk("Connecting to %s (test.mosquitto.org)", BROKER_IP_ADDRESS);
   while(!mqttConnected)
   {
     printk(".");
@@ -154,6 +157,18 @@ void main(void)
     k_msleep(BLINK_DELAY_MS);
     gpio_pin_toggle_dt(&redLED);
     k_msleep(BLINK_DELAY_MS);
+
+    /* Publish MQTT message */
+    publishParams.message.topic.qos = MQTT_QOS_1_AT_LEAST_ONCE;
+    publishParams.message.topic.topic.utf8 = (uint8_t *)"zephyr/test";
+    publishParams.message.topic.topic.size = strlen(publishParams.message.topic.topic.utf8);
+    publishParams.message.payload.data = (uint8_t *)"Hello world from zephyr!";
+    publishParams.message.payload.len = strlen(publishParams.message.payload.data);
+    publishParams.message_id = sys_rand32_get();
+    publishParams.dup_flag = 0U;
+    publishParams.retain_flag = 0U;
+    mqtt_publish(&clientCtx, &publishParams);
+    k_msleep(PUBLISH_DELAY_MS);
   }
 }
 
@@ -180,7 +195,7 @@ static void _dhcpv4_handler(struct net_mgmt_event_callback *netMgmtEvtCb, uint32
   case NET_EVENT_IPV4_ADDR_ADD:
     if(NET_ADDR_DHCP == netIf->config.ip.ipv4->unicast[0].addr_type)
     {
-      printk("Your address: %s\r\n", net_addr_ntop(AF_INET, &netIf->config.ip.ipv4->unicast[0].address.in_addr, buf, sizeof(buf)));
+      printk("\r\nYour address: %s\r\n", net_addr_ntop(AF_INET, &netIf->config.ip.ipv4->unicast[0].address.in_addr, buf, sizeof(buf)));
       printk("Lease time: %u seconds\r\n", netIf->config.dhcpv4.lease_time);
       printk("Subnet: %s\r\n", net_addr_ntop(AF_INET, &netIf->config.ip.ipv4->netmask, buf, sizeof(buf)));
       printk("Router: %s\r\n", net_addr_ntop(AF_INET, &netIf->config.ip.ipv4->gw, buf, sizeof(buf)));
